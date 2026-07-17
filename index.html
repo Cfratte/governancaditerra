@@ -62,7 +62,7 @@
   label.field-label{display:block; font-size:12.5px; font-weight:600; text-transform:uppercase; letter-spacing:.6px; color:var(--ink-soft); margin-bottom:6px;}
   input[type=text], textarea, select{
     width:100%; padding:11px 12px; border:1.5px solid var(--line); border-radius:8px;
-    background:var(--card); color:var(--ink); font-size:15px; font-family:inherit;
+    background:var(--card); color:var(--ink); font-size:16px; font-family:inherit;
   }
   textarea{resize:vertical; min-height:56px;}
   input:focus, textarea:focus, select:focus{outline:2px solid var(--ink); outline-offset:1px;}
@@ -284,6 +284,11 @@
       <p class="page-sub">Preencha os dados antes de iniciar a vistoria. Válido para as hospedagens da Fazenda Querência. O número do evento (EVT) é o que conecta o check-in ao check-out — use sempre o mesmo número para a mesma estadia.</p>
 
       <div class="field">
+        <label class="field-label">Governança responsável</label>
+        <input type="text" id="inpGovernanca" placeholder="Nome de quem está fazendo a vistoria">
+      </div>
+
+      <div class="field">
         <label class="field-label">Local</label>
         <div class="choice-row">
           <div class="choice" data-group="casa" data-value="noivo">Casa do Noivo</div>
@@ -336,6 +341,7 @@
     <!-- SCREEN 1: CHECKLIST -->
     <section class="screen" id="screen-1">
       <h1 class="page-title" id="checklistTitle">Vistoria</h1>
+      <p class="page-sub" id="checklistGovernancaLine" style="margin-bottom:6px;"></p>
       <p class="page-sub">Avalie cada item. Toda condição diferente de "Bom" deve ter uma foto e uma observação — isso é o que garante a cobrança em caso de avaria.</p>
       <div id="offlineBanner" style="display:none;" class="warn-banner">⚠ Sem conexão no momento. Continue preenchendo normalmente — os dados ficam guardados nesta aba até você conseguir salvar. Não feche a aba.</div>
       <div id="checklistWarn"></div>
@@ -595,7 +601,7 @@ function formatPrice(v){
 }
 
 let state = {
-  casa:null, tipo:null, codigo:"", hospede:"", pet:null,
+  casa:null, tipo:null, codigo:"", hospede:"", pet:null, governanca:"",
   items:[], // {uid, categoria, nome, status, obs, foto}
   previousItems:null, // from checkin, when tipo=checkout
   assinanteNome:"", assinanteCpf:"", sigDataUrl:null, timestamp:null,
@@ -617,6 +623,7 @@ document.querySelectorAll('.choice').forEach(el=>{
 
 document.getElementById('inpCodigo').addEventListener('input', e=> state.codigo = e.target.value.trim());
 document.getElementById('inpHospede').addEventListener('input', e=> state.hospede = e.target.value.trim());
+document.getElementById('inpGovernanca').addEventListener('input', e=> state.governanca = e.target.value.trim());
 
 document.getElementById('btnGoTool').addEventListener('click', ()=> showScreen(0));
 document.getElementById('btnGoPrecosView').addEventListener('click', ()=>{
@@ -679,7 +686,7 @@ async function hasOpenCheckin(casa, excludeEvt){
 document.getElementById('btnStartChecklist').addEventListener('click', async ()=>{
   const warn = document.getElementById('checkoutWarning');
   warn.innerHTML='';
-  if(!state.casa || !state.tipo || !state.codigo || !state.hospede || !state.pet){
+  if(!state.casa || !state.tipo || !state.codigo || !state.hospede || !state.pet || !state.governanca){
     warn.innerHTML = '<div class="warn-banner">Preencha todos os campos antes de continuar.</div>';
     return;
   }
@@ -708,6 +715,7 @@ document.getElementById('btnStartChecklist').addEventListener('click', async ()=
         if(continuar){
           state.items = draft.items;
           document.getElementById('checklistTitle').textContent = 'Check-in — ' + casaLabel(state.casa);
+          document.getElementById('checklistGovernancaLine').textContent = 'Governança responsável: ' + state.governanca;
           document.getElementById('draftRow').style.display = 'flex';
           renderChecklist();
           showScreen(1);
@@ -735,6 +743,7 @@ document.getElementById('btnStartChecklist').addEventListener('click', async ()=
   }
 
   document.getElementById('checklistTitle').textContent = (state.tipo==='checkin'?'Check-in — ':'Check-out — ') + casaLabel(state.casa);
+  document.getElementById('checklistGovernancaLine').textContent = 'Governança responsável: ' + state.governanca;
   document.getElementById('draftRow').style.display = state.tipo==='checkin' ? 'flex' : 'none';
   renderChecklist();
   showScreen(1);
@@ -960,6 +969,7 @@ document.getElementById('btnGoToSign').addEventListener('click', ()=>{
   }
   prepareSignatureScreen();
   showScreen(2);
+  requestAnimationFrame(()=> setupSigCanvas());
 });
 
 /* ---------------- Signature screen ---------------- */
@@ -990,11 +1000,9 @@ function prepareSignatureScreen(){
       : '';
     cobrancaBox.style.display = 'none';
   }
-
-  setupSigCanvas();
 }
 
-let sigCtx, drawing=false;
+let sigCtx, drawing=false, sigListenersAttached=false;
 function setupSigCanvas(){
   const canvas = document.getElementById('sigPad');
   const ratio = window.devicePixelRatio || 1;
@@ -1007,9 +1015,12 @@ function setupSigCanvas(){
   sigCtx.strokeStyle = '#1B2A5E';
   sigCtx.clearRect(0,0,canvas.width,canvas.height);
 
+  if(sigListenersAttached) return;
+  sigListenersAttached = true;
+
   const pos = e=>{
     const r = canvas.getBoundingClientRect();
-    const t = e.touches ? e.touches[0] : e;
+    const t = (e.touches && e.touches.length) ? e.touches[0] : e;
     return {x:t.clientX-r.left, y:t.clientY-r.top};
   };
   const start = e=>{ drawing=true; const p=pos(e); sigCtx.beginPath(); sigCtx.moveTo(p.x,p.y); e.preventDefault();};
@@ -1017,7 +1028,10 @@ function setupSigCanvas(){
   const end = ()=>{ drawing=false; };
 
   canvas.onmousedown=start; canvas.onmousemove=move; canvas.onmouseup=end; canvas.onmouseleave=end;
-  canvas.ontouchstart=start; canvas.ontouchmove=move; canvas.ontouchend=end;
+  canvas.addEventListener('touchstart', start, {passive:false});
+  canvas.addEventListener('touchmove', move, {passive:false});
+  canvas.addEventListener('touchend', end, {passive:false});
+  canvas.addEventListener('touchcancel', end, {passive:false});
 }
 document.getElementById('btnClearSig').addEventListener('click', ()=>{
   const canvas = document.getElementById('sigPad');
@@ -1047,7 +1061,7 @@ document.getElementById('btnFinish').addEventListener('click', async ()=>{
   state.timestamp = new Date().toISOString();
 
   const record = {
-    casa: state.casa, tipo: state.tipo, codigo: state.codigo, hospede: state.hospede,
+    casa: state.casa, tipo: state.tipo, codigo: state.codigo, hospede: state.hospede, governanca: state.governanca,
     pet: state.pet, items: state.items, assinanteNome: state.assinanteNome, assinanteCpf: state.assinanteCpf,
     sigDataUrl: state.sigDataUrl, timestamp: state.timestamp,
     cobranca: cobrancaBox.style.display !== 'none' ? {realizada: state.cobrancaRealizada, valor: state.valorCobrado} : null
@@ -1153,6 +1167,7 @@ function generateReportHtml(record, previousItems){
     <div class="report-line"><span>Tipo</span><b>${record.tipo==='checkin'?'Check-in':'Check-out'}</b></div>
     <div class="report-line"><span>Número do evento (EVT)</span><b>${record.codigo}</b></div>
     <div class="report-line"><span>Hóspede</span><b>${record.hospede}</b></div>
+    <div class="report-line"><span>Governança responsável</span><b>${record.governanca || '—'}</b></div>
     <div class="report-line"><span>Pet na hospedagem</span><b>${record.pet==='sim'?'Sim':'Não'}</b></div>
     <div class="report-line"><span>Assinado por</span><b>${record.assinanteNome}</b></div>
     <div class="report-line"><span>CPF de quem assina</span><b>${record.assinanteCpf || '—'}</b></div>
@@ -1557,7 +1572,7 @@ function renderConsultaList(records){
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
         <div>
           <div style="font-weight:700;font-size:14.5px;">${r.codigo} — ${r.hospede}</div>
-          <div style="font-size:12px;color:var(--ink-soft);">${casaLabel(r.casa)} · ${r.tipo==='checkin'?'Check-in':'Check-out'} · ${new Date(r.timestamp).toLocaleString('pt-BR')}</div>
+          <div style="font-size:12px;color:var(--ink-soft);">${casaLabel(r.casa)} · ${r.tipo==='checkin'?'Check-in':'Check-out'} · ${new Date(r.timestamp).toLocaleString('pt-BR')} · Governança: ${r.governanca || '—'}</div>
         </div>
         ${flaggedCount ? `<span class="prev-badge" style="background:var(--bad-bg);color:var(--bad);white-space:nowrap;">${flaggedCount} sinalizado(s)</span>` : ''}
       </div>
